@@ -1,0 +1,254 @@
+---
+title: "BAN430 Assignment1"
+author: ""
+date: 
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+rm(list = ls())
+library(ggplot2)
+library(tseries)
+library(forecast)
+library(seasonal)
+library(zoo)
+library(reshape2)
+```
+
+
+## Data preparation
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+# Read the data
+data <- read.csv("month_aus_prod_chocolate.csv")
+prod <-na.omit(data[,ncol(data)])
+
+#Make a time series object
+prod<- ts(prod,start = c(1957,7),frequency = 12)
+
+#the training set, ending 1994:M8
+train <-window(prod, end=c(1993,8))
+test <-window(prod, start = c(1993,9))
+
+#cut the series that is uesed to plot
+plot.prod <-window(prod, start = c(1992,9))
+```
+
+## Make appropriate summary statistics and plots
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+summary(prod)
+hist(prod)
+```
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+ggtsdisplay(prod)
+```
+
+## Decompose the series into its components
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+prod %>% stl(t.window=21, s.window = 7,robust =TRUE) %>%
+  autoplot()
+```
+
+## Forecast the components and use them to form forecasts the observations
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+forecast1<-stlf(train,h=length(test),t.window=21, s.window = 7,robust =TRUE,level=95)
+forecast2<-stlf(train,h=length(test),t.window=21, s.window = 7,
+                robust =TRUE,level=95,method="naive")
+
+autoplot(plot.prod)+
+  autolayer(forecast1,PI = FALSE,series="ETS forecast")+
+  autolayer(forecast2,PI = FALSE,series="Naive forecast")+
+  theme(legend.position="bottom", legend.box = "vertical")+ 
+  ggtitle("Forecasts from stlf()")+ 
+   ylab("monthly production of chocolate confectionery") + 
+   xlab("Year")
+
+round(accuracy(forecast1,test),2)
+round(accuracy(forecast2,test),2)
+
+```
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+fdata <- data.frame(Time=as.Date(time(plot.prod)), 
+                              Y_as = melt(plot.prod)$value)
+fcast.data <- cbind(fdata,
+              Fitted = c(rep(NA,12), forecast1$mean),
+              Upper.95 =c(rep(NA,12), forecast1$upper),
+              Lower.95=c(rep(NA,12), forecast1$lower))
+
+ ggplot(data=fcast.data,aes(x=Time))+
+  geom_ribbon(aes(ymin=Lower.95,ymax=Upper.95), fill = "grey75")+
+  geom_line(aes(y=Y_as), col='indianred3')+
+  geom_line(aes(y=Fitted), col ="steelblue3")+
+  ggtitle("")+ ylab("") + xlab("Year")
+```
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+desprod <- train %>% stl(t.window=21, s.window = 7,robust =TRUE)
+s.prod <- seasonal(desprod)
+t.prod <- trendcycle(desprod)
+r.prod <- remainder(desprod)
+s.fc<-snaive(s.prod,h=length(test))
+t.fc<-rwf(t.prod,h=length(test),drift = T)
+r.fc<-forecast(arima(r.prod,order = c(0,0,1)),h=length(test))
+fc<-s.fc$mean+t.fc$mean+r.fc$mean
+round(accuracy(fc,test),2)
+
+autoplot(plot.prod,series="Monthly production") +
+  autolayer(fc, series="Components combinded")+
+  ggtitle("Forecasts of each component") + 
+  xlab("Year") +ylab("") +
+  guides(colour=guide_legend(title="Forecast"))+ 
+  theme(legend.position="bottom", legend.box = "vertical")
+
+```
+
+
+
+## Select an appropriate ETS model and use it to forecast the observations
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+#ets model with additive errors
+fets1 <- forecast(ets(train, model="AAA",damped = FALSE),h=length(test),level=95)
+fcast.data <- cbind(fdata,
+              Fitted = c(rep(NA,12), fets1$mean),
+              Upper.95 =c(rep(NA,12), fets1$upper),
+              Lower.95=c(rep(NA,12), fets1$lower))
+
+ ggplot(data=fcast.data,aes(x=Time))+
+  geom_ribbon(aes(ymin=Lower.95,ymax=Upper.95), fill = "grey75")+
+  geom_line(aes(y=Y_as), col='indianred3',size=0.8)+
+  geom_line(aes(y=Fitted), col ="steelblue3",size=0.8)+
+  ggtitle("Forecasts from ETS(A,A,A)")+ 
+   ylab("monthly production of chocolate confectionery") + 
+   xlab("Year")
+ 
+#ets model with multiplicative errors
+fets2 <- forecast(ets(train, model="MAA",damped = FALSE),h=length(test),level=95)
+fcast.data <- cbind(fdata,
+              Fitted = c(rep(NA,12), fets2$mean),
+              Upper.95 =c(rep(NA,12), fets2$upper),
+              Lower.95=c(rep(NA,12), fets2$lower))
+
+ggplot(data=fcast.data,aes(x=Time))+
+  geom_ribbon(aes(ymin=Lower.95,ymax=Upper.95), fill = "grey75")+
+  geom_line(aes(y=Y_as), col='indianred3',size=0.8)+
+  geom_line(aes(y=Fitted), col ="steelblue3",size=0.8)+
+  ggtitle("Forecasts from ETS(M,A,A)")+ 
+   ylab("monthly production of chocolate confectionery") + 
+   xlab("Year")
+
+```
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+# compare the accuracy of ETS models {M, A, M} with either damped or non-damped trends
+round(accuracy(forecast(ets(train, model="MAM",damped = TRUE)),test),2)
+round(accuracy(forecast(ets(train, model="MAM",damped = FALSE)),test),2)
+
+#automatically selected model
+ets(train, model="ZZZ")
+
+```
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+#use it to forecast the observations for the period 1993:M9 to 1995:M8
+fitets <-ets(train, model="MAM",damped = FALSE)
+fets <- forecast(fitets,h=length(test),level=95)
+round(accuracy(fets,test),2)
+#Plot the variable and forecasts
+fcast.data <- cbind(fdata,
+              Fitted = c(rep(NA,12), fets$mean),
+              Upper.95 =c(rep(NA,12), fets$upper),
+              Lower.95=c(rep(NA,12), fets$lower))
+
+ggplot(data=fcast.data,aes(x=Time))+
+  geom_ribbon(aes(ymin=Lower.95,ymax=Upper.95), fill = "grey75")+
+  geom_line(aes(y=Y_as), col='indianred3',size=0.8)+
+  geom_line(aes(y=Fitted), col ="steelblue3",size=0.8)+
+  ggtitle("Forecasts from ETS(M,A,M)")+ 
+   ylab("monthly production of chocolate confectionery") + 
+   xlab("Year")
+
+```
+
+## Write R-code to reproduce the results of tsCV()
+
+### tsCV
+ 
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+f  <- function(y, h) snaive(y,h)
+cv <- tsCV(prod, f, h=2,window=12)
+```
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+head(cv,n=13L)
+```
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+tail(cv)
+```
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+# choose the subset we need to make comparison
+cverr <- window(cv,start = c(1993,08), end = c(1995,06))
+cverr
+#RMSE obtained via time series cross-validation
+RMSE1 <-sqrt(mean(cverr^2, na.rm=TRUE))
+
+```
+
+### R-code cross validation
+
+```{r, eval = TRUE, echo=FALSE, warning=FALSE, error=FALSE,fig.height=4, fig.width=6}
+# forecast horizon
+h <- 2 
+# minimum data length for fitting a model
+k <- length(train) 
+# the cross validation will run m times
+m <- length(test)-(h-1) 
+# save the forecasts of each run
+pred <- matrix(NA,m,h) 
+# save the forecast errors of each run
+err <- matrix(NA,m,h) 
+# the minimum data time for fitting a model
+st <- tsp(prod)[1]+(k-1)/12 
+
+for(i in 1:m)
+{
+  xtrain <- window(prod,end=st + (i-1)/12)
+  fit <- snaive(xtrain, h=2)
+  pred[i,]<-fit$mean
+  xtest <- window(prod, start=st + i/12, end=st + (i+h-1)/12)
+  err[i,]<-xtest-fit$mean
+}
+#the forecasts of each run
+pred <- ts(pred, start = c(1993,08),frequency = 12)
+colnames(pred) <- c("h=1","h=2")
+#the forecast errors of each run
+err<- ts(err, start = c(1993,08),frequency = 12)
+colnames(err) <- c("h=1","h=2")
+err
+identical(cverr,err)
+
+#RMSE
+RMSE2 <- sqrt(mean(err^2, na.rm=TRUE))
+RMSE1
+RMSE2
+identical(RMSE1,RMSE2)
+
+```
+
+
+
